@@ -1,0 +1,8 @@
+run_csh_config.json
+*.local.json
+csh_runs/
+gui_debug.log
+__pycache__/
+*.pyc
+*~
+.DS_Store

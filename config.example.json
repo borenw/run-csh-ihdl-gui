@@ -1,0 +1,17 @@
+{
+  "_comment": "Copy to run_csh_config.json and edit for your site, or set via the Config tab / env vars. Blank cds_lib auto-resolves from the .csh dir / launch dir / $HOME.",
+  "csh_shell": "auto",
+  "cds_lib": "",
+  "lock_check": "yes",
+  "dm_system": "sos",
+  "ihdl_views": "schematic,symbol",
+  "sos_check_cmd": "soscmd status -rec \"{path}\"",
+  "sos_locked_regex": "(?i)(?:locked|checked[\\s-]*out)\\s+by\\s+(\\S+)",
+  "sos_self_ok": "yes",
+  "ds_check_cmd": "dss ls -report status \"{path}\"",
+  "ds_locked_regex": "(?i)locked\\s+by\\s+(\\S+)",
+  "stop_on_lockcheck_error": "yes",
+  "backup_logs": "yes",
+  "modules": "",
+  "auto_load_modules": "yes"
+}
