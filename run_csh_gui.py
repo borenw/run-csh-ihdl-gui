@@ -62,7 +62,7 @@ except ImportError:                                             # 3.5 / 3.6
         allow_reuse_address = True
 
 
-APP_REVISION = 4        # incremental build number, shown top-right in the GUI
+APP_REVISION = 5        # incremental build number, shown top-right in the GUI
 
 
 # --------------------------------------------------------------------------- #
@@ -1362,6 +1362,9 @@ def main():
     ap.add_argument("--base", default=os.path.abspath("./csh_runs"))
     ap.add_argument("--config", default=os.path.abspath("./run_csh_config.json"))
     ap.add_argument("--open", action="store_true")
+    ap.add_argument("--run", action="store_true",
+                    help="headless: run the --csh immediately in this terminal "
+                         "(no browser / GUI needed) and exit")
     args = ap.parse_args()
 
     CSH_ARG = os.path.abspath(os.path.expanduser(args.csh)) if args.csh else ""
@@ -1371,6 +1374,27 @@ def main():
         save_config(CONFIG_PATH, CONFIG)
     RUNS_BASE = os.path.abspath(args.base)
     os.makedirs(RUNS_BASE, exist_ok=True)
+
+    # ---- headless mode: run the .csh immediately from the CLI, no browser ----
+    if args.run:
+        print("=" * 66)
+        print(" Run .csh + ihdl lock-check (HEADLESS)   (rev %d)" % APP_REVISION)
+        print("   >>> BUILD CONFIRM: this is rev %d (watchdog + timeouts active) <<<" % APP_REVISION)
+        print("=" * 66)
+        sys.stdout.flush()
+        if not CSH_ARG or not os.path.isfile(CSH_ARG):
+            sys.stderr.write("ERROR: --run needs a valid --csh <file> (got %r)\n" % CSH_ARG)
+            raise SystemExit(2)
+        job = start_job({"csh": CSH_ARG, "cfg_snapshot": dict(CONFIG)})
+        while job.state in ("queued", "running"):
+            time.sleep(0.5)
+        print("\n" + "=" * 66)
+        print(" RESULT: %s   (state=%s)" % ((job.result or {}).get("status", "?"), job.state))
+        if job.error:
+            print(" ERROR : %s" % job.error)
+        print("=" * 66)
+        sys.stdout.flush()
+        raise SystemExit(0 if job.state == "done" else 1)
 
     httpd = None
     for port in range(args.port, args.port + 20):
@@ -1400,6 +1424,8 @@ def main():
     print("=" * 66)
     print("   >>> BUILD CONFIRM: this is rev %d (watchdog + timeouts active) <<<"
           % APP_REVISION)
+    print("   GUI MODE: open the URL above in a browser and click GO to start a run.")
+    print("   Headless instead?  add --run  to execute the --csh now in this terminal.")
     print("=" * 66)
     sys.stdout.flush()
     if args.open and os.environ.get("DISPLAY"):
