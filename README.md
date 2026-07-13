@@ -20,6 +20,20 @@ Run it from a shell where your Cadence / Cliosoft environment is set up. Open th
 printed `http://127.0.0.1:8988/`. (Uses the GitHub API endpoint so it's never stale;
 the plain `raw.githubusercontent.com` URL is CDN-cached ~5 min.)
 
+## GUI mode vs headless `--run`
+
+By default this is a **GUI** tool: after launch it serves a page and waits — a run only
+starts when you **open the printed URL in a browser and click GO**. On a headless or
+remote host (no browser), launch it and nothing runs until you do that.
+
+To run **without a browser**, add `--run` — it executes the `--csh` immediately in the
+terminal (all steps, watchdog and `-E-` lines stream to stdout) and exits with the
+job's status (exit code 0 = OK, 1 = failed):
+
+```bash
+python3 run_csh_gui.py --run --csh /path/to/run.csh
+```
+
 ## Updating (stop → fetch → verify → relaunch)
 
 The build number is shown **top-right in the GUI** (`rev N`) — it reflects the *running*
@@ -102,6 +116,7 @@ Cellview dirs `<libpath>/<cell>/<view>` are resolved via `cds.lib` (`DEFINE` /
 | `--base DIR` | `./csh_runs` | run outputs + registry |
 | `--config F` | `./run_csh_config.json` | config (persisted from the Config tab) |
 | `--open` | off | open a browser (skipped if no `DISPLAY`) |
+| `--run` | off | headless: run the `--csh` now in this terminal (no browser), then exit |
 
 ## Configuration (Config tab / env / `config.example.json`)
 
