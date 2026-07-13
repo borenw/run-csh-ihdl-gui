@@ -62,7 +62,7 @@ except ImportError:                                             # 3.5 / 3.6
         allow_reuse_address = True
 
 
-APP_REVISION = 2        # incremental build number, shown top-right in the GUI
+APP_REVISION = 3        # incremental build number, shown top-right in the GUI
 
 
 # --------------------------------------------------------------------------- #
@@ -578,6 +578,7 @@ class Job(object):
         self.finished = None
         self.proc = None
         self.lock_report = []
+        self.current_phase = "starting"      # for the watchdog
         self._lock = threading.Lock()
 
     def stop(self):
@@ -741,10 +742,27 @@ def run_job(job):
 
     def phase(desc):
         step_no[0] += 1
+        job.current_phase = "STEP %d: %s" % (step_no[0], desc)
         _banner("STEP %d:" % step_no[0], desc)
         sys.stdout.write("   -I- entered step %d at %s\n"
                          % (step_no[0], time.strftime("%H:%M:%S")))
         sys.stdout.flush()
+
+    # WATCHDOG: print the current phase + elapsed every 6s no matter where the
+    # code is, so a hang anywhere (NFS read, blocked soscmd, ihdl prompt) is
+    # visible instead of a silent stall after a banner.
+    wd_stop = threading.Event()
+
+    def _watchdog():
+        last = ""
+        while not wd_stop.wait(6.0):
+            el = int(time.time() - job.started)
+            note = "" if job.current_phase != last else "  (no new output)"
+            last = job.current_phase
+            sys.stdout.write("   -W- watchdog: in [%s], %ds elapsed%s  (Ctrl-C to abort)\n"
+                             % (job.current_phase, el, note))
+            sys.stdout.flush()
+    threading.Thread(target=_watchdog, daemon=True).start()
 
     try:
         _banner("JOB START:", "run %s   (run dir: %s)" % (csh, run_dir))
@@ -880,6 +898,7 @@ def run_job(job):
         _banner("JOB FAILED:", os.path.basename(csh))
         _err(str(e))
     finally:
+        wd_stop.set()
         job.finished = time.time()
 
 
@@ -1315,12 +1334,16 @@ def _force_utf8_console():
     for nm in ("stdout", "stderr"):
         s = getattr(sys, nm)
         try:
-            s.reconfigure(encoding="utf-8", errors="replace")
+            # line_buffering + write_through so output appears immediately even
+            # when stdout is a pipe/file (not a TTY) -- avoids a "silent" look.
+            s.reconfigure(encoding="utf-8", errors="replace",
+                          line_buffering=True, write_through=True)
         except Exception:
             try:
                 import io
                 setattr(sys, nm, io.TextIOWrapper(s.buffer, encoding="utf-8",
-                                                  errors="replace", line_buffering=True))
+                                                  errors="replace", line_buffering=True,
+                                                  write_through=True))
             except Exception:
                 pass
 
