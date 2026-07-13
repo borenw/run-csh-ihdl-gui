@@ -62,7 +62,7 @@ except ImportError:                                             # 3.5 / 3.6
         allow_reuse_address = True
 
 
-APP_REVISION = 5        # incremental build number, shown top-right in the GUI
+APP_REVISION = 6        # incremental build number, shown top-right in the GUI
 
 
 # --------------------------------------------------------------------------- #
@@ -428,6 +428,14 @@ def parse_ihdl(cmd, csh_dir, cfg):
             for m in re.finditer(r"^\s*module\s+([A-Za-z_]\w*)", _read(vf), re.M):
                 if m.group(1) not in info["cells"]:
                     info["cells"].append(m.group(1))
+    # fallback: use the verilog file's base name as the cell (ihdl names the cell
+    # after the design/module, which usually matches the file name)
+    if not info["cells"]:
+        for vf in info["vfiles"]:
+            base = re.sub(r"\.(v|vh|sv|va)$", "", os.path.basename(vf))
+            if base and base not in info["cells"]:
+                info["cells"].append(base)
+                info["notes"].append("cell '%s' inferred from verilog file name" % base)
     # a `# LOCKCHECK lib= cell= views=` directive in the .csh always wins
     return info
 
@@ -822,10 +830,29 @@ def run_job(job):
                                  (info["library"] or "?", ",".join(info["cells"]) or "?",
                                   ",".join(info["views"]) or "?"))
                 if not info["library"] or not info["cells"]:
-                    _err("could not determine ihdl target (library/cell). "
-                         "Add a '# LOCKCHECK lib=.. cell=.. views=..' line to the .csh.")
+                    # dump everything we parsed so the gap is obvious
+                    sys.stdout.write("   -I- ihdl command : %s\n" % info["cmd"])
+                    sys.stdout.write("   -I- -param file  : %s (%s)\n" %
+                                     (info["param"] or "(none)",
+                                      "found" if info["param"] and os.path.isfile(info["param"]) else "MISSING"))
+                    sys.stdout.write("   -I- -cdslib      : %s\n" % (info["cdslib"] or "(none)"))
+                    sys.stdout.write("   -I- verilog files: %s\n" %
+                                     (", ".join(os.path.basename(v) + ("" if os.path.isfile(v) else "[MISSING]")
+                                               for v in info["vfiles"]) or "(none)"))
+                    sys.stdout.write("   -I- cds.lib used : %s\n" % (cv["cds_lib"] or "(none found)"))
+                    for n in info.get("notes", []):
+                        sys.stdout.write("   -I- note: %s\n" % n)
+                    _err("could not determine ihdl target: %s missing." %
+                         (" and ".join([x for x, ok in (("library", info["library"]),
+                                                        ("cell", info["cells"])) if not ok])))
+                    _err("Fix: add a directive line to the .csh, e.g.:")
+                    _err("       # LOCKCHECK lib=<yourLib> cell=<yourCell> views=schematic,symbol")
+                    _err("     or ensure the ihdl -param file has 'Target Library =' and a "
+                         "cell (top 'module' in a -y/-v verilog file), or set lock_check=no.")
                     if str(cfg.get("stop_on_lockcheck_error", "yes")).lower() in ("1", "yes", "true", "on"):
                         raise RuntimeError("lock-check target unknown; stopping (see -E- above)")
+                    else:
+                        continue
                 for view in cv["cellviews"]:
                     if not view["exists"]:
                         rec = {"path": view["path"] or "(unresolved)", "status": "no-cellview",
