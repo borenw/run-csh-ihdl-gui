@@ -62,7 +62,7 @@ except ImportError:                                             # 3.5 / 3.6
         allow_reuse_address = True
 
 
-APP_REVISION = 6        # incremental build number, shown top-right in the GUI
+APP_REVISION = 7        # incremental build number, shown top-right in the GUI
 
 
 # --------------------------------------------------------------------------- #
@@ -870,12 +870,18 @@ def run_job(job):
                         sys.stdout.write("     %-9s %s/%s -> %s%s\n" %
                                          (mark, rec["cell"], rec["view"], rec["status"],
                                           (" by %s" % rec["owner"]) if rec.get("owner") else ""))
-                        if rec["status"] in ("tool-missing", "error", "timeout") and \
-                                str(cfg.get("stop_on_lockcheck_error", "yes")).lower() in ("1", "yes", "true", "on"):
-                            blocked_any = True
-                            _err("lock-check %s for %s/%s -- cannot confirm it's safe; stopping. "
-                                 "(set stop_on_lockcheck_error=no to override, or fix the DM tool/command)"
-                                 % (rec["status"], rec["cell"], rec["view"]))
+                        if rec["status"] in ("tool-missing", "error", "timeout"):
+                            if str(cfg.get("stop_on_lockcheck_error", "yes")).lower() in ("1", "yes", "true", "on"):
+                                blocked_any = True
+                                _err("lock-check %s for %s/%s -- cannot confirm it's safe; stopping. "
+                                     "(set stop_on_lockcheck_error=no to skip the check and run anyway)"
+                                     % (rec["status"], rec["cell"], rec["view"]))
+                            else:
+                                rec["skipped"] = True
+                                sys.stdout.write("     -W- lock-check %s for %s/%s -- SKIPPING the check "
+                                                 "and proceeding (stop_on_lockcheck_error=no)\n"
+                                                 % (rec["status"], rec["cell"], rec["view"]))
+                                sys.stdout.flush()
                         if rec["blocked"]:
                             blocked_any = True
                             _err("BLOCKED: %s/%s is %s%s -- release it or check it in, then retry."
