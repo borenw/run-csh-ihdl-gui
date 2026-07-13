@@ -34,6 +34,16 @@ job's status (exit code 0 = OK, 1 = failed):
 python3 run_csh_gui.py --run --csh /path/to/run.csh
 ```
 
+**Run directly over HTTPS (no download step)** — pipe the latest script straight from
+GitHub into Python and run it headless in one line:
+
+```bash
+curl -fsSL -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/borenw/run-csh-ihdl-gui/contents/run_csh_gui.py?ref=main" | python3 - --run --csh /path/to/run.csh
+```
+
+Run it from a shell where your Cadence / Cliosoft environment is set up (the piped
+process inherits it). Always fetches the latest — no stale file, nothing saved to disk.
+
 ## Updating (stop → fetch → verify → relaunch)
 
 The build number is shown **top-right in the GUI** (`rev N`) — it reflects the *running*
