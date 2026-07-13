@@ -62,7 +62,7 @@ except ImportError:                                             # 3.5 / 3.6
         allow_reuse_address = True
 
 
-APP_REVISION = 1        # incremental build number, shown top-right in the GUI
+APP_REVISION = 2        # incremental build number, shown top-right in the GUI
 
 
 # --------------------------------------------------------------------------- #
@@ -94,6 +94,7 @@ DEFAULT_CONFIG = {
     # allowed when sos_self_ok=yes).
     "sos_locked_regex": r"(?i)(?:locked|checked[\s-]*out)\s+by\s+(\S+)",
     "sos_self_ok": "yes",                         # allow views you locked yourself
+    "lockcheck_timeout": "60",                    # seconds per cellview check
 
     # DesignSync (used when dm_system=designsync): same {path}/{user} semantics.
     "ds_check_cmd": 'dss ls -report status "{path}"',
@@ -180,6 +181,53 @@ def _artifact(label, path):
     except OSError:
         sys.stdout.write("   -> %-12s %s   (NOT FOUND)\n" % (label + ":", path))
     sys.stdout.flush()
+
+
+def _run_capture(cmd, cwd=None, timeout=60, label="command", hb=5.0):
+    """Run a shell command, streaming a heartbeat to the console every `hb` seconds
+    so a blocking/hung call is visible instead of silent. Returns (rc, output).
+    rc is None on timeout."""
+    sys.stdout.write("   -I- running (%s, timeout %ds): %s\n" % (label, timeout, cmd))
+    sys.stdout.flush()
+    t0 = time.time()
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd, shell=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, encoding="utf-8",
+                                errors="replace", env=os.environ)
+    except Exception as e:
+        sys.stdout.write("   -E- could not start (%s): %s\n" % (label, e))
+        sys.stdout.flush()
+        return (127, str(e))
+    out_lines = []
+    done = threading.Event()
+
+    def _reader():
+        try:
+            for line in iter(proc.stdout.readline, ""):
+                out_lines.append(line)
+            proc.stdout.close()
+        except Exception:
+            pass
+        done.set()
+    threading.Thread(target=_reader, daemon=True).start()
+    while not done.wait(hb):
+        el = time.time() - t0
+        if el > timeout:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            sys.stdout.write("   -E- TIMEOUT after %ds (%s) -- killed. The tool may be "
+                             "waiting on a server/prompt.\n" % (int(el), label))
+            sys.stdout.flush()
+            done.wait(2)
+            return (None, "".join(out_lines))
+        sys.stdout.write("       ...still running (%s): %ds elapsed\n" % (label, int(el)))
+        sys.stdout.flush()
+    rc = proc.wait()
+    sys.stdout.write("   -I- %s finished rc=%s in %ds\n" % (label, rc, int(time.time() - t0)))
+    sys.stdout.flush()
+    return (rc, "".join(out_lines))
 
 
 def _dbg(msg):
@@ -447,17 +495,18 @@ def lock_check_one(path, cfg):
     res = {"path": path, "cmd": cmd, "blocked": False, "status": "clean",
            "owner": "", "output": "", "rc": None}
     try:
-        proc = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, timeout=120)
-        out = proc.stdout.decode("utf-8", "replace")
-        res["rc"] = proc.returncode
-        res["output"] = out[-4000:]
-    except FileNotFoundError:
+        timeout = int(cfg.get("lockcheck_timeout", 60) or 60)
+    except (TypeError, ValueError):
+        timeout = 60
+    rc, out = _run_capture(cmd, timeout=timeout,
+                           label="lock-check %s" % os.path.basename(os.path.dirname(path)))
+    res["rc"] = rc
+    res["output"] = (out or "")[-4000:]
+    if rc is None:
+        res["status"] = "timeout"; return res
+    if rc == 127 and "not found" in out.lower():
         res["status"] = "tool-missing"; return res
-    except Exception as e:
-        res["status"] = "error"; res["output"] = str(e); return res
-
-    if res["rc"] != 0:
+    if rc != 0:
         res["status"] = "error"
         # still scan output; a nonzero rc alone is decided by caller policy
     self_ok = str(cfg.get("sos_self_ok", "yes")).strip().lower() in ("1", "yes", "true", "on")
@@ -693,6 +742,9 @@ def run_job(job):
     def phase(desc):
         step_no[0] += 1
         _banner("STEP %d:" % step_no[0], desc)
+        sys.stdout.write("   -I- entered step %d at %s\n"
+                         % (step_no[0], time.strftime("%H:%M:%S")))
+        sys.stdout.flush()
 
     try:
         _banner("JOB START:", "run %s   (run dir: %s)" % (csh, run_dir))
@@ -759,17 +811,22 @@ def run_job(job):
                         sys.stdout.write("     %-9s %s/%s -> not on disk yet (will be created)\n"
                                          % ("[new]", view["cell"], view["view"]))
                     else:
+                        sys.stdout.write("   checking %s/%s ...\n" % (view["cell"], view["view"]))
+                        sys.stdout.flush()
                         rec = lock_check_one(view["path"], cfg)
                         rec["cell"] = view["cell"]; rec["view"] = view["view"]
                         mark = {"clean": "[ ok ]", "self-lock": "[self]", "locked": "[LOCK]",
-                                "tool-missing": "[????]", "error": "[err ]",
+                                "tool-missing": "[????]", "error": "[err ]", "timeout": "[TIME]",
                                 "no-cellview": "[new ]"}.get(rec["status"], "[????]")
                         sys.stdout.write("     %-9s %s/%s -> %s%s\n" %
                                          (mark, rec["cell"], rec["view"], rec["status"],
                                           (" by %s" % rec["owner"]) if rec.get("owner") else ""))
-                        if rec["status"] in ("tool-missing", "error") and \
+                        if rec["status"] in ("tool-missing", "error", "timeout") and \
                                 str(cfg.get("stop_on_lockcheck_error", "yes")).lower() in ("1", "yes", "true", "on"):
                             blocked_any = True
+                            _err("lock-check %s for %s/%s -- cannot confirm it's safe; stopping. "
+                                 "(set stop_on_lockcheck_error=no to override, or fix the DM tool/command)"
+                                 % (rec["status"], rec["cell"], rec["view"]))
                         if rec["blocked"]:
                             blocked_any = True
                             _err("BLOCKED: %s/%s is %s%s -- release it or check it in, then retry."
@@ -1233,7 +1290,7 @@ async function loadRuns(){const d=await jget('/api/runs');const tb=$('#runstable
 $('#refreshruns').onclick=loadRuns;
 const CFG_LABELS={csh_shell:'shell for .csh (auto/tcsh/csh/sh)',cds_lib:'cds.lib path (blank=auto)',
   lock_check:'lock check on? (yes/no)',dm_system:'DM system (sos/designsync/auto)',ihdl_views:'views to lock-check',
-  sos_check_cmd:'Cliosoft SOS check command ({path})',sos_locked_regex:'SOS locked regex',sos_self_ok:'allow self-locks (yes/no)',
+  sos_check_cmd:'Cliosoft SOS check command ({path})',sos_locked_regex:'SOS locked regex',sos_self_ok:'allow self-locks (yes/no)',lockcheck_timeout:'lock-check timeout (seconds)',
   ds_check_cmd:'DesignSync check command ({path})',ds_locked_regex:'DesignSync locked regex',
   stop_on_lockcheck_error:'stop if lock-check errors (yes/no)',backup_logs:'back up logs before run (yes/no)',
   modules:'modules to auto-load',module_load_cmd:'module-load command ({modules})',auto_load_modules:'auto module-load (yes/no)'};
