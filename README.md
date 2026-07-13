@@ -20,6 +20,42 @@ Run it from a shell where your Cadence / Cliosoft environment is set up. Open th
 printed `http://127.0.0.1:8988/`. (Uses the GitHub API endpoint so it's never stale;
 the plain `raw.githubusercontent.com` URL is CDN-cached ~5 min.)
 
+## Updating (stop → fetch → verify → relaunch)
+
+The build number is shown **top-right in the GUI** (`rev N`) — it reflects the *running*
+process, so you must **restart the server** after updating, not just re-download. This
+one-liner stops the old instance, fetches the latest, prints the rev, and relaunches:
+
+```bash
+pkill -f run_csh_gui.py 2>/dev/null; \
+curl -fsSL -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/borenw/run-csh-ihdl-gui/contents/run_csh_gui.py?ref=main" -o run_csh_gui.py && \
+echo "downloaded: $(grep -m1 APP_REVISION run_csh_gui.py)" && \
+python3 run_csh_gui.py --csh /path/to/run.csh --open
+```
+
+Confirm the printed `APP_REVISION = N` (and the GUI badge) match the latest commit:
+https://github.com/borenw/run-csh-ihdl-gui/commits/main
+
+## Where is it running / stuck?  (terminal vs browser)
+
+All progress goes to the **terminal where you launched `python3`** — *not* the browser:
+
+- `===== STEP N =====` phase banners and `-I- entered step N` lines,
+- `-I- running (…): <command>` before each subprocess, with `…still running: Ns elapsed`,
+- **`-W- watchdog: in [STEP N: …], Ns elapsed`** printed every 6 s **no matter where the
+  code is** — so a hang (blocked `soscmd`/SOS server, a `cds.lib`/param file on a stale
+  NFS mount, an `ihdl` prompt, a license wait) is always visible instead of a silent
+  stall after a banner,
+- `-E-` error lines (a failed step dumps the tool's own last output).
+
+The **browser** shows the progress bar, step checkboxes, lock-check table and live log.
+If you only watch the browser you won't see the watchdog — check the terminal.
+
+If it hangs, read the last `-W- watchdog:` line for the step, and the last `-I- running:`
+line for the exact command; run that command by hand to see what it's waiting on. To
+bypass the lock guard entirely, set **Config → `lock_check` = no**; tune the timeout with
+`lockcheck_timeout`.
+
 ## Why a local server (not a static `.html`)
 
 A static page can't run shell commands. This script runs a tiny HTTP server **in your
