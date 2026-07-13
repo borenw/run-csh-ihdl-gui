@@ -62,7 +62,7 @@ except ImportError:                                             # 3.5 / 3.6
         allow_reuse_address = True
 
 
-APP_REVISION = 3        # incremental build number, shown top-right in the GUI
+APP_REVISION = 4        # incremental build number, shown top-right in the GUI
 
 
 # --------------------------------------------------------------------------- #
@@ -766,6 +766,10 @@ def run_job(job):
 
     try:
         _banner("JOB START:", "run %s   (run dir: %s)" % (csh, run_dir))
+        sys.stdout.write("   -I- >>> rev %d run harness active: watchdog(6s) + "
+                         "per-step heartbeats + lock-check timeout ENABLED <<<\n"
+                         % APP_REVISION)
+        sys.stdout.flush()
 
         # --- 1. parse the .csh ---
         phase("Parse .csh script")
@@ -1393,6 +1397,9 @@ def main():
     print("   config   : %s" % CONFIG_PATH)
     print("   NOTE: the .csh / soscmd / ihdl inherit THIS shell's environment.")
     print("   Ctrl-C to stop.")
+    print("=" * 66)
+    print("   >>> BUILD CONFIRM: this is rev %d (watchdog + timeouts active) <<<"
+          % APP_REVISION)
     print("=" * 66)
     sys.stdout.flush()
     if args.open and os.environ.get("DISPLAY"):
